@@ -1,0 +1,11 @@
+# Папки збірки CMake / Qt Creator
+build/
+*_*_Release/
+*_*_Debug/
+
+# Налаштування Qt Creator
+*.user
+CMakeLists.txt.user
+
+# Локальна база даних (дані складу краще зберігати локально)
+warehouse.db
