@@ -109,7 +109,13 @@ void InventoryManager::addProduct(const QString &barcode, const QString &name, d
     }
 
     QSqlQuery query;
-    query.prepare("INSERT OR REPLACE INTO Products (barcode, name, quantity, unit) VALUES (?, ?, ?, ?)");
+    query.prepare(
+        "INSERT INTO Products (barcode, name, quantity, unit) VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(barcode) DO UPDATE SET "
+        "quantity = quantity + excluded.quantity, "
+        "name = excluded.name, "
+        "unit = excluded.unit"
+    );
     query.addBindValue(barcode.trimmed());
     query.addBindValue(name.trimmed());
     query.addBindValue(quantity);
@@ -123,17 +129,6 @@ void InventoryManager::addProduct(const QString &barcode, const QString &name, d
     emit statusChanged();
     emit productChanged();
 }
-
-// void InventoryManager::addProduct(const QString &barcode, const QString &name, double quantity, const QString &unit)
-// {
-//     QSqlQuery query;
-//     query.prepare("INSERT OR REPLACE INTO Products (barcode, name, quantity, unit) VALUES (?, ?, ?, ?)");
-//     query.addBindValue(barcode);
-//     query.addBindValue(name);
-//     query.addBindValue(quantity);
-//     query.addBindValue(unit);
-//     query.exec();
-// }
 
 QVariantList InventoryManager::getAllProducts()
 {
