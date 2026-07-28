@@ -24,6 +24,7 @@ public:
     Q_INVOKABLE void writeOff(double amount);
     Q_INVOKABLE void addProduct(const QString &barcode, const QString &name, double quantity, const QString &unit);
     Q_INVOKABLE QVariantList getAllProducts();
+    Q_INVOKABLE QVariantMap findProductByBarcode(const QString &barcode);
 
 signals:
     void productChanged();

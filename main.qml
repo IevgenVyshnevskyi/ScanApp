@@ -130,6 +130,19 @@ ApplicationWindow {
                         width: parent.width * 0.45
                         placeholderText: "Штрих-код"
                         font.pixelSize: 13
+                        property bool productAutoFilled: false
+                        onTextChanged: {
+                            var product = inventoryManager.findProductByBarcode(text);
+                            if (product.found) {
+                                newNameField.text = product.name;
+                                newUnitField.text = product.unit;
+                                productAutoFilled = true;
+                            } else if (productAutoFilled) {
+                                newNameField.text = "";
+                                newUnitField.text = "шт";
+                                productAutoFilled = false;
+                            }
+                        }
                     }
 
                     TextField {

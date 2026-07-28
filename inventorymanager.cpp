@@ -130,6 +130,53 @@ void InventoryManager::addProduct(const QString &barcode, const QString &name, d
     emit productChanged();
 }
 
+QVariantMap InventoryManager::findProductByBarcode(const QString &barcode)
+{
+    QVariantMap result;
+    result["found"] = false;
+
+    QString trimmed = barcode.trimmed();
+    if (trimmed.isEmpty()) {
+        return result;
+    }
+
+    // Пошук за префіксом: дозволяє підставити товар ще під час набору коду,
+    // до того як він буде введений повністю.
+    QString pattern = trimmed;
+    pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    pattern += "%";
+
+    QSqlQuery query;
+    query.prepare("SELECT name, quantity, unit FROM Products WHERE barcode LIKE ? ESCAPE '\\' LIMIT 2");
+    query.addBindValue(pattern);
+
+    if (!query.exec()) {
+        return result;
+    }
+
+    int matches = 0;
+    QString name, unit;
+    double quantity = 0.0;
+    while (query.next()) {
+        matches++;
+        if (matches == 1) {
+            name = query.value(0).toString();
+            quantity = query.value(1).toDouble();
+            unit = query.value(2).toString();
+        }
+    }
+
+    // Підставляємо, лише якщо введений префікс однозначно вказує на один товар.
+    if (matches == 1) {
+        result["found"] = true;
+        result["name"] = name;
+        result["quantity"] = quantity;
+        result["unit"] = unit;
+    }
+
+    return result;
+}
+
 QVariantList InventoryManager::getAllProducts()
 {
     QVariantList productList;
