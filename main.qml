@@ -105,7 +105,7 @@ ApplicationWindow {
         // --- БЛОК ДОДАВАННЯ НОВОГО ТОВАРУ ---
         Rectangle {
             width: parent.width
-            height: 140
+            height: 185
             color: "#f9f9f9"
             border.color: "#cccccc"
             radius: 8
@@ -136,10 +136,12 @@ ApplicationWindow {
                             if (product.found) {
                                 newNameField.text = product.name;
                                 newUnitField.text = product.unit;
+                                newPriceField.text = product.price.toFixed(2);
                                 productAutoFilled = true;
                             } else if (productAutoFilled) {
                                 newNameField.text = "";
                                 newUnitField.text = "шт";
+                                newPriceField.text = "0.00";
                                 productAutoFilled = false;
                             }
                         }
@@ -150,6 +152,8 @@ ApplicationWindow {
                         width: parent.width * 0.52
                         placeholderText: "Назва товару"
                         font.pixelSize: 13
+                        readOnly: newBarcodeField.productAutoFilled
+                        color: readOnly ? "#888888" : "#000000"
                     }
                 }
 
@@ -159,7 +163,7 @@ ApplicationWindow {
 
                     TextField {
                         id: newQuantityField
-                        width: parent.width * 0.35
+                        width: parent.width * 0.30
                         placeholderText: "Кількість"
                         text: "1"
                         validator: DoubleValidator { bottom: 0.0; top: 1000000.0 }
@@ -168,25 +172,42 @@ ApplicationWindow {
 
                     TextField {
                         id: newUnitField
-                        width: parent.width * 0.30
+                        width: parent.width * 0.25
                         placeholderText: "Од. (шт/кг)"
                         text: "шт"
                         font.pixelSize: 13
+                        readOnly: newBarcodeField.productAutoFilled
+                        color: readOnly ? "#888888" : "#000000"
                     }
+
+                    TextField {
+                        id: newPriceField
+                        width: parent.width * 0.30
+                        placeholderText: "Ціна, грн"
+                        text: "0.00"
+                        validator: DoubleValidator { bottom: 0.0; top: 1000000.0; decimals: 2; locale: "en_US" }
+                        font.pixelSize: 13
+                    }
+                }
+
+                Row {
+                    width: parent.width
 
                     Button {
                         text: "Зберегти"
-                        width: parent.width * 0.32
+                        width: parent.width
                         onClicked: {
                             inventoryManager.addProduct(
                                 newBarcodeField.text,
                                 newNameField.text,
                                 parseFloat(newQuantityField.text),
-                                newUnitField.text
+                                newUnitField.text,
+                                parseFloat(newPriceField.text)
                             );
                             newBarcodeField.text = "";
                             newNameField.text = "";
                             newQuantityField.text = "1";
+                            newPriceField.text = "0.00";
                             listView.model = inventoryManager.getAllProducts();
                         }
                     }
@@ -243,15 +264,22 @@ ApplicationWindow {
 
                             Text {
                                 text: modelData.name + " (" + modelData.barcode + ")"
-                                width: parent.width * 0.6
+                                width: parent.width * 0.45
                                 elide: Text.ElideRight
                                 font.pixelSize: 13
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                             Text {
                                 text: "Залишок: " + modelData.quantity + " " + modelData.unit
+                                width: parent.width * 0.3
+                                elide: Text.ElideRight
                                 font.pixelSize: 13
                                 font.bold: true
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                text: modelData.price.toFixed(2) + " грн"
+                                font.pixelSize: 13
                                 anchors.verticalCenter: parent.verticalCenter
                             }
                         }

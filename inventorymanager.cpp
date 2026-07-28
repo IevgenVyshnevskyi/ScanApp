@@ -29,6 +29,19 @@ void InventoryManager::initDatabase()
                "quantity REAL, "
                "unit TEXT)");
 
+    // Міграція: додаємо колонку ціни, якщо база створена до її появи.
+    bool hasPriceColumn = false;
+    QSqlQuery columnCheck("PRAGMA table_info(Products)");
+    while (columnCheck.next()) {
+        if (columnCheck.value(1).toString() == "price") {
+            hasPriceColumn = true;
+            break;
+        }
+    }
+    if (!hasPriceColumn) {
+        query.exec("ALTER TABLE Products ADD COLUMN price REAL DEFAULT 0");
+    }
+
     // Таблиця історії списань
     query.exec("CREATE TABLE IF NOT EXISTS Transactions ("
                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -100,7 +113,7 @@ void InventoryManager::writeOff(double amount)
     emit statusChanged();
 }
 
-void InventoryManager::addProduct(const QString &barcode, const QString &name, double quantity, const QString &unit)
+void InventoryManager::addProduct(const QString &barcode, const QString &name, double quantity, const QString &unit, double price)
 {
     if (barcode.trimmed().isEmpty() || name.trimmed().isEmpty()) {
         m_statusMessage = "Помилка: штрих-код і назва не можуть бути пустими!";
@@ -110,16 +123,18 @@ void InventoryManager::addProduct(const QString &barcode, const QString &name, d
 
     QSqlQuery query;
     query.prepare(
-        "INSERT INTO Products (barcode, name, quantity, unit) VALUES (?, ?, ?, ?) "
+        "INSERT INTO Products (barcode, name, quantity, unit, price) VALUES (?, ?, ?, ?, ?) "
         "ON CONFLICT(barcode) DO UPDATE SET "
         "quantity = quantity + excluded.quantity, "
         "name = excluded.name, "
-        "unit = excluded.unit"
+        "unit = excluded.unit, "
+        "price = excluded.price"
     );
     query.addBindValue(barcode.trimmed());
     query.addBindValue(name.trimmed());
     query.addBindValue(quantity);
     query.addBindValue(unit.trimmed());
+    query.addBindValue(price);
 
     if (query.exec()) {
         m_statusMessage = QString("Товар '%1' успішно додано/оновлено!").arg(name);
@@ -140,38 +155,19 @@ QVariantMap InventoryManager::findProductByBarcode(const QString &barcode)
         return result;
     }
 
-    // Пошук за префіксом: дозволяє підставити товар ще під час набору коду,
-    // до того як він буде введений повністю.
-    QString pattern = trimmed;
-    pattern.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-    pattern += "%";
-
+    // Точний збіг: штрих-код - це ідентифікатор товару, а не пошуковий рядок.
+    // Пошук за префіксом тут не годиться - введений код може бути самостійним,
+    // коротшим штрих-кодом іншого товару, а не незавершеним набором довшого.
     QSqlQuery query;
-    query.prepare("SELECT name, quantity, unit FROM Products WHERE barcode LIKE ? ESCAPE '\\' LIMIT 2");
-    query.addBindValue(pattern);
+    query.prepare("SELECT name, quantity, unit, price FROM Products WHERE barcode = ?");
+    query.addBindValue(trimmed);
 
-    if (!query.exec()) {
-        return result;
-    }
-
-    int matches = 0;
-    QString name, unit;
-    double quantity = 0.0;
-    while (query.next()) {
-        matches++;
-        if (matches == 1) {
-            name = query.value(0).toString();
-            quantity = query.value(1).toDouble();
-            unit = query.value(2).toString();
-        }
-    }
-
-    // Підставляємо, лише якщо введений префікс однозначно вказує на один товар.
-    if (matches == 1) {
+    if (query.exec() && query.next()) {
         result["found"] = true;
-        result["name"] = name;
-        result["quantity"] = quantity;
-        result["unit"] = unit;
+        result["name"] = query.value(0).toString();
+        result["quantity"] = query.value(1).toDouble();
+        result["unit"] = query.value(2).toString();
+        result["price"] = query.value(3).toDouble();
     }
 
     return result;
@@ -180,7 +176,7 @@ QVariantMap InventoryManager::findProductByBarcode(const QString &barcode)
 QVariantList InventoryManager::getAllProducts()
 {
     QVariantList productList;
-    QSqlQuery query("SELECT barcode, name, quantity, unit FROM Products");
+    QSqlQuery query("SELECT barcode, name, quantity, unit, price FROM Products");
 
     while (query.next()) {
         QVariantMap product;
@@ -188,6 +184,7 @@ QVariantList InventoryManager::getAllProducts()
         product["name"] = query.value(1).toString();
         product["quantity"] = query.value(2).toDouble();
         product["unit"] = query.value(3).toString();
+        product["price"] = query.value(4).toDouble();
         productList.append(product);
     }
 
