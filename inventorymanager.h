@@ -22,9 +22,11 @@ public:
 
     Q_INVOKABLE void processBarcode(const QString &barcode);
     Q_INVOKABLE void writeOff(double amount);
-    Q_INVOKABLE void addProduct(const QString &barcode, const QString &name, double quantity, const QString &unit, double price);
-    Q_INVOKABLE QVariantList getAllProducts();
+    Q_INVOKABLE void addProduct(const QString &barcode, const QString &name, double quantity, const QString &unit, double price, double sum);
+    Q_INVOKABLE QVariantList getRecentProducts();
     Q_INVOKABLE QVariantMap findProductByBarcode(const QString &barcode);
+    Q_INVOKABLE QVariantList getAllReceipts();
+    Q_INVOKABLE QVariantMap getStockCard(const QString &barcode);
 
 signals:
     void productChanged();
