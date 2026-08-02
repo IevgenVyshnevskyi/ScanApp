@@ -15,6 +15,17 @@ ApplicationWindow {
         newSumField.text = (qty * price).toFixed(2);
     }
 
+    function docTypeLabel(code) {
+        switch (code) {
+            case "PRYHID": return "Прибуткова накладна";
+            case "VYDATOK": return "Видаткова накладна";
+            case "SPYSANNYA": return "Акт списання";
+            case "OPRYBUTKUVANNYA": return "Акт оприбуткування";
+            case "PEREMISHCHENNYA": return "Переміщення між складами";
+            default: return code;
+        }
+    }
+
     header: TabBar {
         id: pageTabBar
 
@@ -35,6 +46,9 @@ ApplicationWindow {
             text: "📋  Картка обліку (М-14)"
         }
         */
+        TabButton {
+            text: "📄  Документообіг"
+        }
     }
 
     StackLayout {
@@ -570,6 +584,462 @@ ApplicationWindow {
                                     color: "#e0e0e0"
                                     anchors.bottom: parent.bottom
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==================== СТОРІНКА 4: ДОКУМЕНТООБІГ ====================
+        Item {
+            id: documentsPage
+
+            property var warehousesModel: []
+
+            function refreshWarehouses() {
+                documentsPage.warehousesModel = inventoryManager.getWarehouses();
+            }
+
+            function refreshDocuments() {
+                documentsListView.model = inventoryManager.getDocuments();
+            }
+
+            Component.onCompleted: {
+                documentsPage.refreshWarehouses();
+            }
+
+            Flickable {
+                anchors.fill: parent
+                anchors.margins: 20
+                contentWidth: width
+                contentHeight: docColumn.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+                ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                Column {
+                    id: docColumn
+                    width: parent.width
+                    spacing: 15
+
+                    Text {
+                        text: "Документообіг"
+                        font.pixelSize: 16
+                        font.bold: true
+                    }
+
+                    // --- Склади ---
+                    Rectangle {
+                        width: parent.width
+                        height: 60
+                        color: "#f9f9f9"
+                        border.color: "#cccccc"
+                        radius: 8
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 8
+                            width: parent.width - 30
+
+                            Text {
+                                text: "Склади:"
+                                font.pixelSize: 13
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            ComboBox {
+                                width: parent.width * 0.35
+                                model: documentsPage.warehousesModel
+                                textRole: "name"
+                            }
+                            TextField {
+                                id: newWarehouseField
+                                width: parent.width * 0.35
+                                placeholderText: "Назва нового складу"
+                                font.pixelSize: 13
+                            }
+                            Button {
+                                text: "Додати склад"
+                                onClicked: {
+                                    if (inventoryManager.addWarehouse(newWarehouseField.text)) {
+                                        newWarehouseField.text = "";
+                                        documentsPage.refreshWarehouses();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // --- Новий документ ---
+                    Rectangle {
+                        width: parent.width
+                        height: docFormColumn.height + 30
+                        color: "#f9f9f9"
+                        border.color: "#cccccc"
+                        radius: 8
+
+                        Column {
+                            id: docFormColumn
+                            anchors.top: parent.top
+                            anchors.topMargin: 15
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            width: parent.width - 30
+                            spacing: 8
+
+                            property bool isTransfer: docTypeCombo.model.get(docTypeCombo.currentIndex).code === "PEREMISHCHENNYA"
+
+                            Text {
+                                text: "Новий документ:"
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+
+                            Row {
+                                spacing: 8
+                                width: parent.width
+
+                                Text { text: "Тип:"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+
+                                ComboBox {
+                                    id: docTypeCombo
+                                    width: parent.width * 0.7
+                                    textRole: "label"
+                                    model: ListModel {
+                                        ListElement { code: "PRYHID"; label: "Прибуткова накладна (надходження)" }
+                                        ListElement { code: "VYDATOK"; label: "Видаткова накладна (відвантаження)" }
+                                        ListElement { code: "SPYSANNYA"; label: "Акт списання" }
+                                        ListElement { code: "OPRYBUTKUVANNYA"; label: "Акт оприбуткування" }
+                                        ListElement { code: "PEREMISHCHENNYA"; label: "Переміщення між складами" }
+                                    }
+                                }
+                            }
+
+                            Row {
+                                spacing: 8
+                                width: parent.width
+                                visible: !docFormColumn.isTransfer
+
+                                Text { text: "Склад:"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+                                ComboBox {
+                                    id: singleWarehouseCombo
+                                    width: parent.width * 0.6
+                                    model: documentsPage.warehousesModel
+                                    textRole: "name"
+                                }
+                            }
+
+                            Row {
+                                spacing: 8
+                                width: parent.width
+                                visible: docFormColumn.isTransfer
+
+                                Text { text: "Зі складу:"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+                                ComboBox {
+                                    id: fromWarehouseCombo
+                                    width: parent.width * 0.3
+                                    model: documentsPage.warehousesModel
+                                    textRole: "name"
+                                }
+                                Text { text: "На склад:"; font.pixelSize: 13; anchors.verticalCenter: parent.verticalCenter }
+                                ComboBox {
+                                    id: toWarehouseCombo
+                                    width: parent.width * 0.3
+                                    model: documentsPage.warehousesModel
+                                    textRole: "name"
+                                }
+                            }
+
+                            Text {
+                                text: "Додати рядок:"
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+
+                            Row {
+                                spacing: 8
+                                width: parent.width
+
+                                TextField {
+                                    id: lineBarcodeField
+                                    width: parent.width * 0.2
+                                    placeholderText: "Штрих-код"
+                                    font.pixelSize: 13
+                                    property bool autoFilled: false
+                                    onTextChanged: {
+                                        var product = inventoryManager.findDocProductByBarcode(text);
+                                        if (product.found) {
+                                            lineNameField.text = product.name;
+                                            lineUnitField.editText = product.unit;
+                                            linePriceField.text = product.price.toFixed(2);
+                                            autoFilled = true;
+                                        } else if (autoFilled) {
+                                            lineNameField.text = "";
+                                            lineUnitField.editText = "шт";
+                                            linePriceField.text = "0.00";
+                                            autoFilled = false;
+                                        }
+                                    }
+                                }
+                                TextField {
+                                    id: lineNameField
+                                    width: parent.width * 0.26
+                                    placeholderText: "Назва товару"
+                                    font.pixelSize: 13
+                                    readOnly: lineBarcodeField.autoFilled
+                                    color: readOnly ? "#888888" : "#000000"
+                                }
+                                ComboBox {
+                                    id: lineUnitField
+                                    width: parent.width * 0.14
+                                    font.pixelSize: 13
+                                    editable: true
+                                    model: ["шт", "кг", "г", "л", "мл", "м", "м²", "м³", "уп", "компл"]
+                                    currentIndex: 0
+                                    enabled: !lineBarcodeField.autoFilled
+                                }
+                                TextField {
+                                    id: linePriceField
+                                    width: parent.width * 0.15
+                                    placeholderText: "Ціна"
+                                    text: "0.00"
+                                    validator: DoubleValidator { bottom: 0.0; top: 1000000.0; decimals: 2; locale: "en_US" }
+                                    font.pixelSize: 13
+                                }
+                                TextField {
+                                    id: lineQuantityField
+                                    width: parent.width * 0.13
+                                    placeholderText: "К-сть"
+                                    text: "1"
+                                    validator: DoubleValidator { bottom: 0.01; top: 1000000.0 }
+                                    font.pixelSize: 13
+                                }
+                                Button {
+                                    text: "+"
+                                    width: parent.width * 0.08
+                                    onClicked: {
+                                        if (lineBarcodeField.text.trim() === "" || lineNameField.text.trim() === "") {
+                                            return;
+                                        }
+                                        pendingLinesModel.append({
+                                            barcode: lineBarcodeField.text.trim(),
+                                            name: lineNameField.text.trim(),
+                                            unit: lineUnitField.editText,
+                                            price: parseFloat(linePriceField.text) || 0,
+                                            quantity: parseFloat(lineQuantityField.text) || 0
+                                        });
+                                        lineBarcodeField.text = "";
+                                        lineQuantityField.text = "1";
+                                    }
+                                }
+                            }
+
+                            // Рядки документа, що готуються до проведення
+                            Rectangle {
+                                width: parent.width
+                                height: Math.max(50, pendingLinesModel.count * 26 + 30)
+                                color: "#ffffff"
+                                border.color: "#dddddd"
+                                radius: 6
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    spacing: 2
+
+                                    Row {
+                                        width: parent.width
+                                        spacing: 8
+                                        Text { text: "Товар"; width: parent.width * 0.4; font.bold: true; font.pixelSize: 12 }
+                                        Text { text: "К-сть"; width: parent.width * 0.15; font.bold: true; font.pixelSize: 12 }
+                                        Text { text: "Ціна"; width: parent.width * 0.15; font.bold: true; font.pixelSize: 12 }
+                                        Text { text: "Сума"; width: parent.width * 0.15; font.bold: true; font.pixelSize: 12 }
+                                        Text { text: ""; width: parent.width * 0.1; font.pixelSize: 12 }
+                                    }
+
+                                    Repeater {
+                                        model: pendingLinesModel
+                                        delegate: Row {
+                                            width: parent.width
+                                            spacing: 8
+                                            height: 24
+
+                                            Text {
+                                                text: name + " (" + unit + ")"
+                                                width: parent.width * 0.4
+                                                font.pixelSize: 12
+                                                elide: Text.ElideRight
+                                            }
+                                            Text { text: quantity; width: parent.width * 0.15; font.pixelSize: 12 }
+                                            Text { text: price.toFixed(2); width: parent.width * 0.15; font.pixelSize: 12 }
+                                            Text { text: (quantity * price).toFixed(2); width: parent.width * 0.15; font.pixelSize: 12 }
+                                            Button {
+                                                text: "✕"
+                                                width: parent.width * 0.1
+                                                height: 22
+                                                onClicked: pendingLinesModel.remove(index)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                text: "Рядків у документі: " + pendingLinesModel.count
+                                font.pixelSize: 12
+                                color: "#555555"
+                            }
+
+                            Button {
+                                text: "Провести документ"
+                                width: parent.width
+                                onClicked: {
+                                    var lines = [];
+                                    for (var i = 0; i < pendingLinesModel.count; i++) {
+                                        lines.push(pendingLinesModel.get(i));
+                                    }
+
+                                    var docType = docTypeCombo.model.get(docTypeCombo.currentIndex).code;
+                                    var warehouseId = -1;
+                                    var fromId = -1;
+                                    var toId = -1;
+
+                                    if (docFormColumn.isTransfer) {
+                                        if (documentsPage.warehousesModel[fromWarehouseCombo.currentIndex]) {
+                                            fromId = documentsPage.warehousesModel[fromWarehouseCombo.currentIndex].id;
+                                        }
+                                        if (documentsPage.warehousesModel[toWarehouseCombo.currentIndex]) {
+                                            toId = documentsPage.warehousesModel[toWarehouseCombo.currentIndex].id;
+                                        }
+                                    } else if (documentsPage.warehousesModel[singleWarehouseCombo.currentIndex]) {
+                                        warehouseId = documentsPage.warehousesModel[singleWarehouseCombo.currentIndex].id;
+                                    }
+
+                                    var newId = inventoryManager.createDocument(docType, warehouseId, fromId, toId, "", lines);
+                                    if (newId > 0) {
+                                        pendingLinesModel.clear();
+                                        documentsPage.refreshDocuments();
+                                    }
+                                }
+                            }
+
+                            ListModel {
+                                id: pendingLinesModel
+                            }
+                        }
+                    }
+
+                    // --- Історія документів ---
+                    Text {
+                        text: "Історія документів:"
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 220
+                        color: "#fafafa"
+                        border.color: "#dddddd"
+                        radius: 8
+
+                        ListView {
+                            id: documentsListView
+                            anchors.fill: parent
+                            anchors.margins: 5
+                            clip: true
+                            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+                            model: inventoryManager.getDocuments()
+
+                            delegate: Rectangle {
+                                width: parent.width
+                                height: 30
+                                color: index % 2 === 0 ? "#ffffff" : "#f2f2f2"
+
+                                Row {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+
+                                    Text {
+                                        text: "№" + modelData.docNumber
+                                        width: parent.width * 0.1
+                                        font.pixelSize: 12
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: docTypeLabel(modelData.docType)
+                                        width: parent.width * 0.28
+                                        elide: Text.ElideRight
+                                        font.pixelSize: 12
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: modelData.docType === "PEREMISHCHENNYA"
+                                              ? (modelData.fromWarehouse + " → " + modelData.toWarehouse)
+                                              : modelData.warehouse
+                                        width: parent.width * 0.27
+                                        elide: Text.ElideRight
+                                        font.pixelSize: 12
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: modelData.date.replace("T", " ")
+                                        width: parent.width * 0.18
+                                        font.pixelSize: 11
+                                        color: "#555555"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                    Text {
+                                        text: modelData.totalSum.toFixed(2) + " грн"
+                                        width: parent.width * 0.15
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        documentLinesListView.model = inventoryManager.getDocumentLines(modelData.id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: "Рядки обраного документа (клікніть на документ вище):"
+                        font.pixelSize: 13
+                        font.bold: true
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 120
+                        color: "#ffffff"
+                        border.color: "#dddddd"
+                        radius: 6
+
+                        ListView {
+                            id: documentLinesListView
+                            anchors.fill: parent
+                            anchors.margins: 5
+                            clip: true
+                            model: []
+
+                            delegate: Row {
+                                width: parent.width
+                                spacing: 8
+                                height: 24
+
+                                Text { text: modelData.name; width: parent.width * 0.4; font.pixelSize: 12; elide: Text.ElideRight }
+                                Text { text: modelData.quantity + " " + modelData.unit; width: parent.width * 0.2; font.pixelSize: 12 }
+                                Text { text: modelData.price.toFixed(2) + " грн"; width: parent.width * 0.2; font.pixelSize: 12 }
+                                Text { text: modelData.sum.toFixed(2) + " грн"; width: parent.width * 0.2; font.pixelSize: 12; font.bold: true }
                             }
                         }
                     }

@@ -77,6 +77,66 @@ void InventoryManager::initDatabase()
                "sum REAL, "
                "timestamp TEXT, "
                "operator TEXT)");
+
+    // Таблиця складів
+    query.exec("CREATE TABLE IF NOT EXISTS Warehouses ("
+               "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+               "name TEXT UNIQUE)");
+
+    // Стартовий склад за замовчуванням, якщо жодного ще немає.
+    QSqlQuery warehouseCountQuery("SELECT COUNT(*) FROM Warehouses");
+    if (warehouseCountQuery.next() && warehouseCountQuery.value(0).toInt() == 0) {
+        QSqlQuery seedWarehouse;
+        seedWarehouse.prepare("INSERT INTO Warehouses (name) VALUES (?)");
+        seedWarehouse.addBindValue("Головний склад");
+        seedWarehouse.exec();
+    }
+
+    // Таблиця залишків у розрізі складів - джерело істини для документообігу.
+    // Повністю автономна від Products: стартує порожньою, без міграції старих даних,
+    // і наповнюється виключно через проведені документи.
+    query.exec("CREATE TABLE IF NOT EXISTS Stock ("
+               "warehouse_id INTEGER, "
+               "barcode TEXT, "
+               "quantity REAL DEFAULT 0, "
+               "PRIMARY KEY (warehouse_id, barcode))");
+
+    // Таблиці документообігу: кожна дія зі складом фіксується документом (шапка + рядки),
+    // а не прямою зміною залишку. Документообіг не читає й не пише в Products/Receipts/
+    // Transactions - це окрема, самодостатня підсистема зі своїм каталогом (DocumentLines).
+    query.exec("CREATE TABLE IF NOT EXISTS Documents ("
+               "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+               "doc_type TEXT, "
+               "doc_number INTEGER, "
+               "doc_date TEXT, "
+               "warehouse_id INTEGER, "
+               "from_warehouse_id INTEGER, "
+               "to_warehouse_id INTEGER, "
+               "operator TEXT, "
+               "comment TEXT)");
+
+    query.exec("CREATE TABLE IF NOT EXISTS DocumentLines ("
+               "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+               "document_id INTEGER, "
+               "barcode TEXT, "
+               "name TEXT, "
+               "quantity REAL, "
+               "unit TEXT, "
+               "price REAL, "
+               "sum REAL)");
+}
+
+void InventoryManager::adjustStock(int warehouseId, const QString &barcode, double delta)
+{
+    QSqlQuery upsert;
+    upsert.prepare(
+        "INSERT INTO Stock (warehouse_id, barcode, quantity) VALUES (?, ?, ?) "
+        "ON CONFLICT(warehouse_id, barcode) DO UPDATE SET quantity = quantity + excluded.quantity"
+    );
+    upsert.addBindValue(warehouseId);
+    upsert.addBindValue(barcode);
+    upsert.addBindValue(delta);
+    upsert.exec();
 }
 
 void InventoryManager::processBarcode(const QString &barcode)
@@ -348,4 +408,243 @@ QVariantMap InventoryManager::getStockCard(const QString &barcode)
     result["movements"] = movementList;
 
     return result;
+}
+
+QVariantList InventoryManager::getWarehouses()
+{
+    QVariantList list;
+    QSqlQuery query("SELECT id, name FROM Warehouses ORDER BY name");
+    while (query.next()) {
+        QVariantMap warehouse;
+        warehouse["id"] = query.value(0).toInt();
+        warehouse["name"] = query.value(1).toString();
+        list.append(warehouse);
+    }
+    return list;
+}
+
+QVariantMap InventoryManager::findDocProductByBarcode(const QString &barcode)
+{
+    // Автономний від Products каталог документообігу: підстановка назви/одиниці/ціни
+    // береться з останнього рядка DocumentLines із цим штрих-кодом, а не зі спільної картки товару.
+    QVariantMap result;
+    result["found"] = false;
+
+    QString trimmed = barcode.trimmed();
+    if (trimmed.isEmpty()) {
+        return result;
+    }
+
+    QSqlQuery query;
+    query.prepare("SELECT name, unit, price FROM DocumentLines WHERE barcode = ? ORDER BY id DESC LIMIT 1");
+    query.addBindValue(trimmed);
+
+    if (query.exec() && query.next()) {
+        result["found"] = true;
+        result["name"] = query.value(0).toString();
+        result["unit"] = query.value(1).toString();
+        result["price"] = query.value(2).toDouble();
+    }
+
+    return result;
+}
+
+bool InventoryManager::addWarehouse(const QString &name)
+{
+    QString trimmed = name.trimmed();
+    if (trimmed.isEmpty()) {
+        return false;
+    }
+
+    QSqlQuery query;
+    query.prepare("INSERT OR IGNORE INTO Warehouses (name) VALUES (?)");
+    query.addBindValue(trimmed);
+    return query.exec() && query.numRowsAffected() > 0;
+}
+
+int InventoryManager::createDocument(const QString &docType, int warehouseId, int fromWarehouseId, int toWarehouseId,
+                                      const QString &comment, const QVariantList &lines)
+{
+    if (lines.isEmpty()) {
+        m_statusMessage = "Помилка: документ повинен містити хоча б один рядок!";
+        emit statusChanged();
+        return -1;
+    }
+
+    const bool isTransfer = (docType == "PEREMISHCHENNYA");
+    const bool isIncoming = (docType == "PRYHID" || docType == "OPRYBUTKUVANNYA");
+    const bool isOutgoing = (docType == "VYDATOK" || docType == "SPYSANNYA");
+
+    if (isTransfer && fromWarehouseId == toWarehouseId) {
+        m_statusMessage = "Помилка: склад відправлення та отримання не можуть збігатися!";
+        emit statusChanged();
+        return -1;
+    }
+
+    if (!m_db.transaction()) {
+        m_statusMessage = "Помилка бази даних: не вдалося почати транзакцію!";
+        emit statusChanged();
+        return -1;
+    }
+
+    // Перевіряємо достатність залишку одразу для всіх рядків, щоб документ
+    // проводився або повністю, або не проводився взагалі.
+    if (isOutgoing || isTransfer) {
+        const int sourceWarehouseId = isTransfer ? fromWarehouseId : warehouseId;
+        for (const QVariant &lineVar : lines) {
+            QVariantMap line = lineVar.toMap();
+            QString barcode = line["barcode"].toString().trimmed();
+            double quantity = line["quantity"].toDouble();
+
+            QSqlQuery stockQuery;
+            stockQuery.prepare("SELECT quantity FROM Stock WHERE warehouse_id = ? AND barcode = ?");
+            stockQuery.addBindValue(sourceWarehouseId);
+            stockQuery.addBindValue(barcode);
+            double available = 0.0;
+            if (stockQuery.exec() && stockQuery.next()) {
+                available = stockQuery.value(0).toDouble();
+            }
+            if (quantity > available) {
+                m_db.rollback();
+                m_statusMessage = QString("Помилка: недостатньо залишку '%1' на складі (є %2, потрібно %3)!")
+                                       .arg(line["name"].toString())
+                                       .arg(available)
+                                       .arg(quantity);
+                emit statusChanged();
+                return -1;
+            }
+        }
+    }
+
+    QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    QSqlQuery docNumberQuery;
+    docNumberQuery.prepare("SELECT COUNT(*) FROM Documents WHERE doc_type = ?");
+    docNumberQuery.addBindValue(docType);
+    int docNumber = 1;
+    if (docNumberQuery.exec() && docNumberQuery.next()) {
+        docNumber = docNumberQuery.value(0).toInt() + 1;
+    }
+
+    QSqlQuery docInsert;
+    docInsert.prepare(
+        "INSERT INTO Documents (doc_type, doc_number, doc_date, warehouse_id, from_warehouse_id, to_warehouse_id, operator, comment) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    docInsert.addBindValue(docType);
+    docInsert.addBindValue(docNumber);
+    docInsert.addBindValue(now);
+    docInsert.addBindValue(isTransfer ? QVariant() : QVariant(warehouseId));
+    docInsert.addBindValue(isTransfer ? QVariant(fromWarehouseId) : QVariant());
+    docInsert.addBindValue(isTransfer ? QVariant(toWarehouseId) : QVariant());
+    docInsert.addBindValue("Оператор 1");
+    docInsert.addBindValue(comment);
+
+    if (!docInsert.exec()) {
+        m_db.rollback();
+        m_statusMessage = "Помилка бази даних при створенні документа!";
+        emit statusChanged();
+        return -1;
+    }
+
+    const int documentId = docInsert.lastInsertId().toInt();
+
+    for (const QVariant &lineVar : lines) {
+        QVariantMap line = lineVar.toMap();
+        QString barcode = line["barcode"].toString().trimmed();
+        QString name = line["name"].toString().trimmed();
+        QString unit = line["unit"].toString().trimmed();
+        double quantity = line["quantity"].toDouble();
+        double price = line["price"].toDouble();
+        double sum = quantity * price;
+
+        QSqlQuery lineInsert;
+        lineInsert.prepare(
+            "INSERT INTO DocumentLines (document_id, barcode, name, quantity, unit, price, sum) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        );
+        lineInsert.addBindValue(documentId);
+        lineInsert.addBindValue(barcode);
+        lineInsert.addBindValue(name);
+        lineInsert.addBindValue(quantity);
+        lineInsert.addBindValue(unit);
+        lineInsert.addBindValue(price);
+        lineInsert.addBindValue(sum);
+        lineInsert.exec();
+
+        // Змінюємо залишок(и) по складу(ах) - єдине місце, де quantity у Stock рухається,
+        // і завжди в парі з рядком документа вище. Каталог товару для документообігу -
+        // це сама історія DocumentLines (див. findDocProductByBarcode), без звернень до Products.
+        if (isTransfer) {
+            adjustStock(fromWarehouseId, barcode, -quantity);
+            adjustStock(toWarehouseId, barcode, quantity);
+        } else if (isIncoming) {
+            adjustStock(warehouseId, barcode, quantity);
+        } else if (isOutgoing) {
+            adjustStock(warehouseId, barcode, -quantity);
+        }
+    }
+
+    if (!m_db.commit()) {
+        m_db.rollback();
+        m_statusMessage = "Помилка бази даних при збереженні документа!";
+        emit statusChanged();
+        return -1;
+    }
+
+    m_statusMessage = QString("Документ №%1 успішно проведено!").arg(docNumber);
+    emit statusChanged();
+    return documentId;
+}
+
+QVariantList InventoryManager::getDocuments()
+{
+    QVariantList list;
+    QSqlQuery query(
+        "SELECT d.id, d.doc_type, d.doc_number, d.doc_date, "
+        "w.name, wf.name, wt.name, "
+        "(SELECT COUNT(*) FROM DocumentLines WHERE document_id = d.id), "
+        "(SELECT COALESCE(SUM(sum), 0) FROM DocumentLines WHERE document_id = d.id) "
+        "FROM Documents d "
+        "LEFT JOIN Warehouses w ON w.id = d.warehouse_id "
+        "LEFT JOIN Warehouses wf ON wf.id = d.from_warehouse_id "
+        "LEFT JOIN Warehouses wt ON wt.id = d.to_warehouse_id "
+        "ORDER BY d.id DESC"
+    );
+
+    while (query.next()) {
+        QVariantMap doc;
+        doc["id"] = query.value(0).toInt();
+        doc["docType"] = query.value(1).toString();
+        doc["docNumber"] = query.value(2).toInt();
+        doc["date"] = query.value(3).toString();
+        doc["warehouse"] = query.value(4).toString();
+        doc["fromWarehouse"] = query.value(5).toString();
+        doc["toWarehouse"] = query.value(6).toString();
+        doc["lineCount"] = query.value(7).toInt();
+        doc["totalSum"] = query.value(8).toDouble();
+        list.append(doc);
+    }
+    return list;
+}
+
+QVariantList InventoryManager::getDocumentLines(int documentId)
+{
+    QVariantList list;
+    QSqlQuery query;
+    query.prepare("SELECT barcode, name, quantity, unit, price, sum FROM DocumentLines WHERE document_id = ?");
+    query.addBindValue(documentId);
+    query.exec();
+
+    while (query.next()) {
+        QVariantMap line;
+        line["barcode"] = query.value(0).toString();
+        line["name"] = query.value(1).toString();
+        line["quantity"] = query.value(2).toDouble();
+        line["unit"] = query.value(3).toString();
+        line["price"] = query.value(4).toDouble();
+        line["sum"] = query.value(5).toDouble();
+        list.append(line);
+    }
+    return list;
 }

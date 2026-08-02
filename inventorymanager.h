@@ -27,6 +27,13 @@ public:
     Q_INVOKABLE QVariantMap findProductByBarcode(const QString &barcode);
     Q_INVOKABLE QVariantList getAllReceipts();
     Q_INVOKABLE QVariantMap getStockCard(const QString &barcode);
+    Q_INVOKABLE QVariantList getWarehouses();
+    Q_INVOKABLE bool addWarehouse(const QString &name);
+    Q_INVOKABLE QVariantMap findDocProductByBarcode(const QString &barcode);
+    Q_INVOKABLE int createDocument(const QString &docType, int warehouseId, int fromWarehouseId, int toWarehouseId,
+                                    const QString &comment, const QVariantList &lines);
+    Q_INVOKABLE QVariantList getDocuments();
+    Q_INVOKABLE QVariantList getDocumentLines(int documentId);
 
 signals:
     void productChanged();
@@ -34,6 +41,7 @@ signals:
 
 private:
     void initDatabase();
+    void adjustStock(int warehouseId, const QString &barcode, double delta);
 
     QSqlDatabase m_db;
     QString m_currentBarcode;
