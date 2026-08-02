@@ -35,12 +35,14 @@ ApplicationWindow {
             }
         }
 
+        /* Тимчасово вимкнено
         TabButton {
             text: "🏠  Головна"
         }
         TabButton {
             text: "🧾  Історія оприбуткувань"
         }
+        */
         /* Тимчасово вимкнено
         TabButton {
             text: "📋  Картка обліку (М-14)"
@@ -55,6 +57,7 @@ ApplicationWindow {
         anchors.fill: parent
         currentIndex: pageTabBar.currentIndex
 
+        /* Тимчасово вимкнено
         // ==================== СТОРІНКА 1: ГОЛОВНА ====================
         Flickable {
         anchors.fill: parent
@@ -590,6 +593,7 @@ ApplicationWindow {
                 }
             }
         }
+        */
 
         // ==================== СТОРІНКА 4: ДОКУМЕНТООБІГ ====================
         Item {
